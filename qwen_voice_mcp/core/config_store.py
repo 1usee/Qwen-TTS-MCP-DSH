@@ -3,9 +3,14 @@
 Resolution order (highest first):
 
 1. explicit CLI keyword arguments passed to :func:`load_options`
-2. environment variables ``QWEN_VOICE_<FIELD>``
+2. environment variables ``QWEN_VOICE_<FIELD>`` (and ``DASHSCOPE_API_KEY``)
 3. ``config.json`` inside :func:`config_home`
 4. the declared defaults in :mod:`config`
+
+``.env`` files are read *into* the environment before step 2, with the cwd
+(project-local) file taking priority over ``config_home()/.env``. They never
+override a variable the process already has, so an exported value still wins.
+Set ``QWEN_VOICE_NO_DOTENV=1`` to ignore them entirely.
 
 Dependency rule (spec §4): this module is a **near-leaf**. It imports only
 ``config`` and third-party ``pydantic`` — never another project module — so that
@@ -27,6 +32,7 @@ __all__ = [
     "Options",
     "config_home",
     "config_path",
+    "load_dotenv_files",
     "load_options",
     "save_options",
     "LOOPBACK_HOSTS",
@@ -190,12 +196,52 @@ def _read_env() -> dict[str, Any]:
     return found
 
 
+def _dotenv_candidates() -> list[Path]:
+    """Return ``.env`` paths in priority order: cwd first, config home second."""
+    candidates: list[Path] = []
+    try:
+        candidates.append(Path.cwd() / _config.DOTENV_FILENAME)
+    except OSError:  # pragma: no cover - deleted/inaccessible cwd
+        pass
+    candidates.append(config_home() / _config.DOTENV_FILENAME)
+    return candidates
+
+
+def load_dotenv_files() -> list[Path]:
+    """Load ``.env`` files into ``os.environ`` without overriding real variables.
+
+    Returns the files that were actually read. Missing files, a disabled
+    ``python-dotenv`` install, and unreadable/invalid files are all non-fatal:
+    configuration falls back to what the process already has.
+    """
+    if os.environ.get(_config.DOTENV_DISABLE_ENV):
+        return []
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # pragma: no cover - python-dotenv is a hard dependency
+        return []
+
+    loaded: list[Path] = []
+    for path in _dotenv_candidates():
+        if not path.is_file():
+            continue
+        try:
+            # override=False: a real environment variable always wins, and the
+            # first .env seen (cwd) wins over the config-home one.
+            if load_dotenv(path, override=False):
+                loaded.append(path)
+        except (OSError, ValueError):
+            continue
+    return loaded
+
+
 def load_options(**overrides: Any) -> Options:
     """Build :class:`Options` from CLI kwargs > env > ``config.json`` > defaults.
 
     Never fails because the config home is missing or unreadable: an absent,
     torn, or inaccessible ``config.json`` simply yields the defaults.
     """
+    load_dotenv_files()
     home = config_home()
     merged: dict[str, Any] = _read_config_file(home)
     merged.update(_read_env())

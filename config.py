@@ -64,6 +64,13 @@ ENV_PREFIX = "QWEN_VOICE_"
 API_KEY_ENV = "DASHSCOPE_API_KEY"
 KEYRING_SERVICE = "qwen-voice-mcp"
 KEYRING_USERNAME = "vault-master-key"
+#: Set to a non-empty value to skip the OS credential store and use the local
+#: key file directly (headless hosts, and tests that must not touch the profile).
+KEYRING_DISABLE_ENV = "QWEN_VOICE_NO_KEYRING"
+#: Set to a non-empty value to stop ``load_options`` reading any ``.env`` file.
+DOTENV_DISABLE_ENV = "QWEN_VOICE_NO_DOTENV"
+#: Name of the optional dotenv file looked up in the cwd and the config home.
+DOTENV_FILENAME = ".env"
 
 # --------------------------------------------------------------------------
 # Built-in model catalogue

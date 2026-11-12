@@ -1,15 +1,8 @@
 {
   "mcpServers": {
     "qwen-voice": {
-      "command": "D:\\Conda_envs\\mcp-dev\\python.exe",
-      "args": [
-        "F:\\MCP_Server\\Qwen-TTS-MCP-DSH\\server.py",
-        "--transport",
-        "stdio"
-      ],
-      "env": {
-        "PYTHONPATH": "F:\\MCP_Server\\Qwen-TTS-MCP-DSH"
-      }
+      "command": "qwen-voice-mcp",
+      "args": ["run", "--transport", "stdio"]
     }
   }
 }

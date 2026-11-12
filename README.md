@@ -20,55 +20,111 @@ Qwen（DashScope）语音能力接入 **DeepseekHarness（DSH）**：
 ### 1. 安装
 
 ```powershell
-pip install -e .
+# 推荐：装到独立环境，并把 `qwen-voice-mcp` 放进 PATH
+pipx install .
+
+# 或（有 uv 的话）
+uv tool install .
 ```
 
-依赖：`mcp`、`dashscope`、`httpx`、`cryptography`、`keyring`、`soundfile`、`pydantic`、
-`filelock`、`python-dotenv`、`typer`、`rich`。
+开发时用可编辑安装：`pip install -e .`。依赖：`mcp`（**<2**，2.x 重命名了 `FastMCP`）、
+`dashscope`、`httpx`、`cryptography`、`keyring`、`soundfile`、`pydantic`、`filelock`、
+`python-dotenv`、`typer`、`rich`。
 
-### 2. 配置 API 密钥
-
-三种方式任选其一：
+### 2. 配置 API Key（只需一次）
 
 ```powershell
-# A. GUI 配置中心（推荐，密钥加密存储）
-qwen-voice-mcp gui
-
-# B. CLI 写入加密 vault
-qwen-voice-mcp config set-key sk-xxxxxxxxxxxx
-
-# C. 环境变量（优先级最高，不落盘）
-$env:DASHSCOPE_API_KEY = "sk-xxxxxxxxxxxx"
+qwen-voice-mcp setup
 ```
 
-### 3. 启动
+隐藏输入（不回显，也不进 shell 历史）→ 联网验证一次 → 用 AES-256-GCM 加密写入
+`%APPDATA%\qwen-voice-mcp\vault.enc`。**密钥只存这一份，Claude Code、Codex、DSH 共用**——
+任何客户端配置里都不需要出现 `DASHSCOPE_API_KEY`。
+
+CI / 脚本等非交互场景：
 
 ```powershell
-# stdio 模式（本地集成，推荐）
-python server.py --transport stdio
-
-# streamable-http 模式（远程集成）
-python server.py --transport streamable-http --port 8765
+$env:DASHSCOPE_API_KEY | qwen-voice-mcp setup --stdin --no-verify
 ```
+
+### 3. 接入 Claude Code / Codex
+
+```powershell
+qwen-voice-mcp install --client claude,codex
+```
+
+只打印配置、不改文件：
+
+```powershell
+qwen-voice-mcp print-config --client claude   # JSON，贴进 .mcp.json
+qwen-voice-mcp print-config --client codex    # TOML，贴进 ~/.codex/config.toml
+```
+
+### 4. 验证
+
+```powershell
+qwen-voice-mcp doctor      # 依赖 / keyring / 密钥来源 / 客户端配置 一次看全
+qwen-voice-mcp balance     # 用真实密钥探一次余额（免费）
+```
+
+`doctor` 每项都是 `OK` 后，在客户端里 `/mcp` 应能看到 `qwen-voice` 与四个工具。
 
 ---
 
-## 在 DeepseekHarness 中接入
+## 手动接入
 
-### stdio 模式
+`install` 不可用（例如受管环境不允许改用户配置）时，两种方式二选一。
+
+### Claude Code
+
+```powershell
+claude mcp add qwen-voice --scope user -- qwen-voice-mcp run
+```
+
+或把下面内容写进项目根目录的 `.mcp.json`（仓库里已有一份可直接用）：
+
+```json
+{
+  "mcpServers": {
+    "qwen-voice": {
+      "command": "qwen-voice-mcp",
+      "args": ["run", "--transport", "stdio"]
+    }
+  }
+}
+```
+
+### Codex
+
+```powershell
+codex mcp add qwen-voice -- qwen-voice-mcp run
+```
+
+或编辑 `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.qwen-voice]
+command = "qwen-voice-mcp"
+args = ["run", "--transport", "stdio"]
+```
+
+### DeepseekHarness
 
 写入 Harness Profile 的 `cordis.patch.yml`：
 
 ```yaml
 mcp_servers:
   qwen-voice:
-    command: python
-    args: ["F:/MCP_Server/Qwen-TTS-MCP-DSH/server.py", "--transport", "stdio"]
-    env:
-      DASHSCOPE_API_KEY: "${QWEN_API_KEY}"
+    command: qwen-voice-mcp
+    args: ["run", "--transport", "stdio"]
 ```
 
-### streamable-http 模式
+### streamable-http 模式（远程/常驻）
+
+```powershell
+$env:QWEN_VOICE_HTTP_AUTH_TOKEN = "your-strong-random-token"
+qwen-voice-mcp run --transport streamable-http --port 8765
+```
 
 ```yaml
 mcp_servers:
@@ -76,11 +132,11 @@ mcp_servers:
     url: "http://127.0.0.1:8765/mcp"
     transport: "streamable-http"
     headers:
-      Authorization: "Bearer ${MCP_AUTH_TOKEN}"
+      Authorization: "Bearer your-strong-random-token"
 ```
 
-也可以直接在 DSH 的「设置 → MCP」中可视化管理。详细步骤见
-[集成指南](docs/integration-guide.md)。
+详细步骤见 [集成指南](docs/integration-guide.md) 与
+[Claude Code / Codex 接入](docs/claude-codex.md)。
 
 ### 验证
 
@@ -102,8 +158,7 @@ skills/qwen-voice/SKILL.zh-CN.md    # 同一内容的中文译本
 - Skill 安装：复制到各客户端的 skills 目录，或让 `AGENTS.md` 指向它。
 - 完整步骤与验收用例：[中文](docs/agent-integration.zh-CN.md) / [English](docs/agent-integration.md)。
 
-`skills/qwen-voice/SKILL.md` 由 `mcp-to-skill` 生成的草稿整理而来；原始生成物（含工具快照）
-保留在 [`docs/generated/mcp-to-skill/qwen-voice/`](docs/generated/mcp-to-skill/qwen-voice/)。
+`skills/qwen-voice/SKILL.md` 由 `mcp-to-skill` 生成的草稿整理而来，`skills/` 下的两份是唯一维护源。
 
 ---
 
@@ -209,12 +264,19 @@ server.py ──► tools/*  ──► core/services.VoiceServices ──┬─�
 ## 开发
 
 ```powershell
-# 运行测试（219 个用例，全程离线，不消耗任何额度）
+# 运行测试（290 个用例，全程离线，不消耗任何额度）
 python -m pytest -q
 
 # 自检：确认四个工具可被发现
 python server.py --selftest
 python -m qwen_voice_mcp --selftest
+
+# 体检：依赖 / mcp 版本 / 密钥来源 / 客户端注册状态
+qwen-voice-mcp doctor
+
+# 客户端注册（幂等，可撤销）
+qwen-voice-mcp install --client claude,codex
+qwen-voice-mcp install --client claude,codex --uninstall
 
 # 探测模型真实可用性（需要有效密钥）
 qwen-voice-mcp verify-models
@@ -223,15 +285,18 @@ qwen-voice-mcp verify-models
 | 测试文件 | 用例数 | 覆盖 |
 |----------|-------:|------|
 | `test_models.py` | 9 | 状态枚举、结果模型 |
-| `test_config_store.py` | 10 | 四级配置优先级、范围校验 |
-| `test_secret_manager.py` | 13 | 加密往返、篡改检测、并发写 |
+| `test_config_store.py` | 15 | 四级配置优先级、`.env`、范围校验 |
+| `test_secret_manager.py` | 21 | 加密往返、篡改检测、并发写、KEK 三级回退 |
 | `test_model_registry.py` | 12 | 清单、成本估算、verified 标记 |
 | `test_audio_utils.py` | 18 | 时长/格式/大小校验、base64、后端降级 |
 | `test_balance_checker.py` | 21 | 端点回退、阈值三档、未知余额 |
 | `test_qwen_client.py` | 25 | 异常分类、AudioFormat 映射、prefix 合法性 |
 | `test_services.py` | 31 | 计费闸门顺序、错误兜底 |
 | `test_mcp_tools.py` | 16 | in-memory MCP 工具发现与调用 |
-| `test_cli.py` | 13 | CLI 命令、退出码、脱敏 |
+| `test_cli.py` | 36 | 密钥录入、setup/doctor/print-config/install、退出码、脱敏 |
+| `test_installers.py` | 25 | Claude/Codex 配置合并、幂等、拒绝损坏文件 |
+| `test_startup_credentials.py` | 3 | 启动时从加密库注入密钥（无环境变量） |
+| `test_packaging.py` | 3 | `mcp<2` 上界、`.mcp.json` 可移植性 |
 | `test_voice_store.py` | 14 | 音色别名持久化 |
 | `test_root_entrypoint.py` | 12 | `server.py` 参数路由 |
 | `test_regressions.py` | 25 | SDK 绑定健康、错误消息可读性、GUI 保存前校验 |

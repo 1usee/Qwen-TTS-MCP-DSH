@@ -12,86 +12,94 @@ Two steps make it work: **register the MCP server** (so the client sees the four
 
 ---
 
-## 1. Confirm the server runs
-
-From the repository root, using an interpreter with the dependencies installed:
+## 1. Install the package and confirm it runs
 
 ```powershell
-D:\Conda_envs\mcp-dev\python.exe server.py --selftest
+pipx install .          # or: uv tool install .
+qwen-voice-mcp selftest
+qwen-voice-mcp doctor
 ```
 
-Expected: `SELFTEST OK` followed by the four tool names. Dependencies are listed in [`pyproject.toml`](../pyproject.toml).
+Expected: `SELFTEST OK` followed by the four tool names, then a `doctor` table where every row reads
+`OK` / `已配置` / `已注册`. Dependencies are listed in [`pyproject.toml`](../pyproject.toml).
 
 Then exercise a real stdio handshake (the way another agent's client would):
 
 ```powershell
-D:\Conda_envs\mcp-dev\python.exe scripts\stdio_smoke.py
+python scripts\stdio_smoke.py
 ```
 
 Expected last line: `STDIO CONTRACT OK`, listing `check_balance`, `clone_voice`, `list_voice_models`,
 and `synthesize_speech`.
 
-> On this machine, `D:\Conda_envs\mcp-dev` is the only environment with `dashscope` / `keyring` /
-> `soundfile` / `mcp` installed. `mcp-dev-2` lacks `keyring`, `dashscope`, and `soundfile`;
-> the Python 3.15 on `PATH` has none of the project dependencies.
+> Only when developing from source do you need to care about the interpreter: the project requires
+> one environment that has `dashscope` / `keyring` / `soundfile` / `mcp` (**<2**) installed. Once
+> installed as a command, client configs no longer contain an interpreter path — which is exactly
+> what makes them portable across machines.
 
 ---
 
 ## 2. Register the MCP server
 
+One command registers both clients (idempotent, reversible):
+
+```powershell
+qwen-voice-mcp install --client claude,codex
+qwen-voice-mcp install --client claude,codex --uninstall   # undo
+```
+
+Per-client target paths, `--dry-run`, and the manual route are in
+[Claude Code / Codex integration](claude-codex.md). In short:
+
 ### Claude Code
 
-Project scope (recommended — write `.mcp.json` at the repository root):
+```powershell
+claude mcp add qwen-voice --scope user -- qwen-voice-mcp run
+```
+
+Or `.mcp.json` at the repository root (this repository already ships one):
 
 ```json
 {
   "mcpServers": {
     "qwen-voice": {
-      "command": "D:\\Conda_envs\\mcp-dev\\python.exe",
-      "args": [
-        "F:\\MCP_Server\\Qwen-TTS-MCP-DSH\\server.py",
-        "--transport",
-        "stdio"
-      ],
-      "env": {
-        "PYTHONPATH": "F:\\MCP_Server\\Qwen-TTS-MCP-DSH"
-      }
+      "command": "qwen-voice-mcp",
+      "args": ["run", "--transport", "stdio"]
     }
   }
 }
 ```
 
-Or register from the command line:
-
-```powershell
-claude mcp add qwen-voice `
-  -e PYTHONPATH="F:\MCP_Server\Qwen-TTS-MCP-DSH" `
-  -- D:\Conda_envs\mcp-dev\python.exe `
-     F:\MCP_Server\Qwen-TTS-MCP-DSH\server.py --transport stdio
-```
-
-Confirm with `claude mcp list` (status should be connected), and inspect the tools with `/mcp` in a session.
+Confirm with `claude mcp list` (status should be connected), and inspect the tools with `/mcp`.
 
 ### Codex
 
-Edit `~/.codex/config.toml`:
+```powershell
+codex mcp add qwen-voice -- qwen-voice-mcp run
+```
+
+Or edit `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.qwen-voice]
-command = "D:\\Conda_envs\\mcp-dev\\python.exe"
-args = ["F:\\MCP_Server\\Qwen-TTS-MCP-DSH\\server.py", "--transport", "stdio"]
-
-[mcp_servers.qwen-voice.env]
-PYTHONPATH = "F:\\MCP_Server\\Qwen-TTS-MCP-DSH"
+command = "qwen-voice-mcp"
+args = ["run", "--transport", "stdio"]
 ```
 
 Start `codex` and use `/mcp` to see connected servers and their tools.
 
+> ⚠️ Never append a second `[mcp_servers.qwen-voice]` table: duplicate tables are a TOML syntax
+> error and Codex will refuse the whole file. Use `qwen-voice-mcp install --client codex`, which
+> replaces rather than appends.
+
 ### DeepSeek Harness
 
-`~/.dsh/profiles/<profile>/cordis.yml` already contains an equivalent entry (currently pointing at
-`F:\dsh-MCP\Qwen-TTS-MCP-DSH`, which is identical to this repository). To switch it to this checkout,
-change `command`, `args`, and `PYTHONPATH`.
+```powershell
+qwen-voice-mcp print-config --client dsh
+```
+
+Paste the output into `~/.dsh/profiles/<profile>/cordis.yml`. DSH has no config format we can merge
+safely, so `install --client dsh` only prints the fragment and never writes a file.
 
 ---
 
@@ -161,11 +169,29 @@ Then check the boundary case:
 
 ## 5. API key
 
-Pick one, highest priority first:
+One command does it all (hidden input, validated, persisted):
 
-1. Environment variable `DASHSCOPE_API_KEY` (nothing on disk; best for CI or temporary use)
-2. GUI: `qwen-voice-mcp gui` → save (writes to the encrypted vault)
-3. CLI: `qwen-voice-mcp config set-key sk-xxxx`
+```powershell
+qwen-voice-mcp setup
+```
 
-The key is never — and should never be — passed to an agent through chat. No key is stored on this
-machine yet (`check_balance` reports it as unconfigured).
+Other routes, highest priority first:
+
+1. Environment variable `DASHSCOPE_API_KEY` (nothing on disk; best for CI or temporary use — it
+   overrides the vault)
+2. The encrypted vault, written by `setup` / `config set-key` / the GUI
+3. A `.env` file in the current directory or the config home (disable with
+   `QWEN_VOICE_NO_DOTENV=1`)
+
+`config set-key` also accepts piped input, for scripts:
+
+```powershell
+$env:MY_KEY | qwen-voice-mcp config set-key --stdin
+```
+
+The key lives in `%APPDATA%\qwen-voice-mcp\vault.enc`; its master key is held by the OS credential
+store. Hosts without one (WSL, Docker, CI) fall back to a key file next to the vault, and `doctor`
+reports which tier is active.
+
+The key is never — and should never be — passed to an agent through chat, and it never appears in a
+client config file.

@@ -62,3 +62,62 @@ def test_non_loopback_allowed_when_opted_in(config_home):
 
 def test_config_home_honours_env(config_home):
     assert qv_config_home() == config_home
+
+
+# ---------------------------------------------------------------------------
+# .env support
+#
+# `python-dotenv` was a declared dependency and `.env.example` documented the
+# file, but nothing ever loaded it: a user who followed the docs got "未配置
+# API 密钥". These tests pin the documented behaviour.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def restore_environ():
+    """Undo os.environ writes made by dotenv (which bypass monkeypatch)."""
+    import os
+
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
+
+
+def test_dotenv_in_config_home_feeds_options(config_home, restore_environ):
+    (config_home / ".env").write_text("QWEN_VOICE_DEFAULT_VOICE=demo-voice\n", encoding="utf-8")
+    assert load_options().default_voice == "demo-voice"
+
+
+def test_dotenv_in_cwd_feeds_options(config_home, tmp_path, monkeypatch, restore_environ):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".env").write_text("QWEN_VOICE_DEFAULT_VOICE=project-voice\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    assert load_options().default_voice == "project-voice"
+
+
+def test_real_environment_wins_over_dotenv(config_home, monkeypatch, restore_environ):
+    (config_home / ".env").write_text("QWEN_VOICE_DEFAULT_VOICE=from-file\n", encoding="utf-8")
+    monkeypatch.setenv("QWEN_VOICE_DEFAULT_VOICE", "from-env")
+
+    assert load_options().default_voice == "from-env"
+
+
+def test_dotenv_can_supply_the_api_key(config_home, restore_environ):
+    """The whole point of .env is a key without exporting it by hand."""
+    import os
+
+    os.environ.pop("DASHSCOPE_API_KEY", None)
+    (config_home / ".env").write_text("DASHSCOPE_API_KEY=sk-from-dotenv\n", encoding="utf-8")
+
+    load_options()
+    assert os.environ["DASHSCOPE_API_KEY"] == "sk-from-dotenv"
+
+
+def test_dotenv_can_be_disabled(config_home, monkeypatch, restore_environ):
+    (config_home / ".env").write_text("QWEN_VOICE_DEFAULT_VOICE=demo-voice\n", encoding="utf-8")
+    monkeypatch.setenv("QWEN_VOICE_NO_DOTENV", "1")
+
+    assert load_options().default_voice != "demo-voice"

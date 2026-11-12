@@ -63,6 +63,21 @@ def _install_inheritable_mkdir() -> None:
 _install_inheritable_mkdir()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_environment(monkeypatch):
+    """Strip ambient config env vars so the developer's shell cannot change results.
+
+    Not hypothetical: exporting ``QWEN_VOICE_NO_KEYRING=1`` (or ``DASHSCOPE_API_KEY``,
+    or a ``QWEN_VOICE_HOME``) in the terminal makes tests that never mention those
+    variables fail in confusing ways. Each test starts from a clean slate and opts
+    in to what it needs.
+    """
+    for name in list(os.environ):
+        if name.startswith("QWEN_VOICE_") or name in ("DASHSCOPE_API_KEY", "CODEX_HOME"):
+            monkeypatch.delenv(name, raising=False)
+    yield
+
+
 @pytest.fixture
 def config_home(tmp_path, monkeypatch):
     """Isolate ``QWEN_VOICE_HOME`` so config/vault tests never touch the real profile."""

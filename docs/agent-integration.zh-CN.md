@@ -11,12 +11,11 @@
 
 ---
 
-## 1. 先确认服务器本身能跑
-
-在仓库根目录执行（用装好依赖的解释器）：
+## 1. 先装好包并跑通自检
 
 ```powershell
-D:\Conda_envs\mcp-dev\python.exe server.py --selftest
+pipx install .          # 或：uv tool install .
+qwen-voice-mcp selftest
 ```
 
 预期输出 `SELFTEST OK` 和四个工具名。依赖清单见 [`pyproject.toml`](../pyproject.toml)。
@@ -24,70 +23,79 @@ D:\Conda_envs\mcp-dev\python.exe server.py --selftest
 再跑一次真实 stdio 握手（模拟其他 agent 的客户端）：
 
 ```powershell
-D:\Conda_envs\mcp-dev\python.exe scripts\stdio_smoke.py
+qwen-voice-mcp doctor
+python scripts\stdio_smoke.py
 ```
 
-预期最后一行 `STDIO CONTRACT OK`，并列出 `check_balance`、`clone_voice`、`list_voice_models`、`synthesize_speech`。
+`doctor` 的每一行都应为 `OK` / `已配置` / `已注册`；`stdio_smoke.py` 预期最后一行
+`STDIO CONTRACT OK`，并列出 `check_balance`、`clone_voice`、`list_voice_models`、`synthesize_speech`。
 
-> 本机现状：`D:\Conda_envs\mcp-dev` 是唯一装齐 `dashscope` / `keyring` / `soundfile` / `mcp` 的环境。
-> `mcp-dev-2` 缺 `keyring`、`dashscope`、`soundfile`；PATH 上的 Python 3.15 没有项目依赖。
+> 从源码开发时才需要注意解释器：本项目需要同时装有 `dashscope` / `keyring` /
+> `soundfile` / `mcp`（**<2**）的环境。装成命令行工具后，客户端配置里不再出现
+> 解释器路径，也就不会因为换机器而失效。
 
 ---
 
 ## 2. 注册 MCP 服务器
 
+一条命令，两个客户端都注册（幂等、可撤销）：
+
+```powershell
+qwen-voice-mcp install --client claude,codex
+qwen-voice-mcp install --client claude,codex --uninstall   # 撤销
+```
+
+各客户端的默认写入位置、`--dry-run`、以及 `install` 不可用时的手动配置，见
+[Claude Code / Codex 接入](claude-codex.md)。摘要：
+
 ### Claude Code
 
-项目级（推荐，写入仓库根目录 `.mcp.json`）：
+```powershell
+claude mcp add qwen-voice --scope user -- qwen-voice-mcp run
+```
+
+或项目根目录 `.mcp.json`（仓库里已有一份可直接用）：
 
 ```json
 {
   "mcpServers": {
     "qwen-voice": {
-      "command": "D:\\Conda_envs\\mcp-dev\\python.exe",
-      "args": [
-        "F:\\MCP_Server\\Qwen-TTS-MCP-DSH\\server.py",
-        "--transport",
-        "stdio"
-      ],
-      "env": {
-        "PYTHONPATH": "F:\\MCP_Server\\Qwen-TTS-MCP-DSH"
-      }
+      "command": "qwen-voice-mcp",
+      "args": ["run", "--transport", "stdio"]
     }
   }
 }
-```
-
-或命令行注册：
-
-```powershell
-claude mcp add qwen-voice `
-  -e PYTHONPATH="F:\MCP_Server\Qwen-TTS-MCP-DSH" `
-  -- D:\Conda_envs\mcp-dev\python.exe `
-     F:\MCP_Server\Qwen-TTS-MCP-DSH\server.py --transport stdio
 ```
 
 用 `claude mcp list` 确认状态为 connected，会话里用 `/mcp` 查看工具。
 
 ### Codex
 
-编辑 `~/.codex/config.toml`：
+```powershell
+codex mcp add qwen-voice -- qwen-voice-mcp run
+```
+
+或编辑 `~/.codex/config.toml`：
 
 ```toml
 [mcp_servers.qwen-voice]
-command = "D:\\Conda_envs\\mcp-dev\\python.exe"
-args = ["F:\\MCP_Server\\Qwen-TTS-MCP-DSH\\server.py", "--transport", "stdio"]
-
-[mcp_servers.qwen-voice.env]
-PYTHONPATH = "F:\\MCP_Server\\Qwen-TTS-MCP-DSH"
+command = "qwen-voice-mcp"
+args = ["run", "--transport", "stdio"]
 ```
 
 启动 `codex` 后用 `/mcp` 查看已连接的服务器与工具。
 
+> ⚠️ 不要手工追加第二份同名表——TOML 里重复声明同一张表是语法错误。
+> 需要修改请用 `qwen-voice-mcp install --client codex`，它会替换而不是追加。
+
 ### DeepSeek Harness
 
-`~/.dsh/profiles/<profile>/cordis.yml` 中已有一份等价配置（当前指向 `F:\dsh-MCP\Qwen-TTS-MCP-DSH`，与本仓库内容一致）。
-若要改为本仓库路径，改 `command` / `args` / `PYTHONPATH` 三处即可。
+```powershell
+qwen-voice-mcp print-config --client dsh
+```
+
+把输出粘进 `~/.dsh/profiles/<profile>/cordis.yml`。DSH 没有可安全自动合并的配置格式，
+所以 `install --client dsh` 只打印片段、不改文件。
 
 ---
 
@@ -156,10 +164,25 @@ Copy-Item -Recurse -Force "skills\qwen-voice" ".dsh\skills\qwen-voice"
 
 ## 5. 密钥
 
-三种方式任选其一，优先级从高到低：
+推荐用一条命令完成（隐藏输入、默认先验证、写入加密库）：
 
-1. 环境变量 `DASHSCOPE_API_KEY`（不落盘，推荐 CI/临时使用）
-2. GUI：`qwen-voice-mcp gui` → 保存配置（写入加密 vault）
-3. CLI：`qwen-voice-mcp config set-key sk-xxxx`
+```powershell
+qwen-voice-mcp setup
+```
 
-密钥不会、也不应该通过对话传给 agent。当前机器上尚未保存任何密钥（`check_balance` 会提示未配置）。
+其他方式，优先级从高到低：
+
+1. 环境变量 `DASHSCOPE_API_KEY`（不落盘，推荐 CI/临时使用；会覆盖加密库）
+2. 加密库，由 `setup` / `config set-key` / GUI 写入
+3. `.env` 文件（当前目录或配置目录，`QWEN_VOICE_NO_DOTENV=1` 可关闭）
+
+`config set-key` 也可以管道输入，适合脚本：
+
+```powershell
+$env:MY_KEY | qwen-voice-mcp config set-key --stdin
+```
+
+密钥存于 `%APPDATA%\qwen-voice-mcp\vault.enc`，主密钥由系统凭据管理器保管；
+无凭据管理器的环境（WSL/Docker/CI）自动回退到同目录密钥文件，`doctor` 会标明强度。
+
+密钥不会、也不应该通过对话传给 agent——客户端配置里也不需要出现它。

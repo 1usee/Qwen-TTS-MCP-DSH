@@ -9,33 +9,54 @@
 | 项 | 要求 | 自检 |
 |----|------|------|
 | Python | 3.10+ | `python --version` |
-| 依赖 | 已安装 | `python -c "import mcp, dashscope, soundfile"` |
+| 依赖 | 已安装（`mcp` 必须 <2） | `qwen-voice-mcp doctor` |
 | Qwen API Key | 有效 | 见 §2 |
 | DSH | 已安装并可打开 | — |
 
 ---
 
-## 1. 获取项目路径
+## 1. 安装
+
+```powershell
+pipx install .          # 或：uv tool install .
+qwen-voice-mcp doctor   # 每一项都应为 OK / 已配置 / 已注册
+```
+
+装成命令行工具后，客户端配置里只写 `qwen-voice-mcp`，不需要解释器绝对路径——
+换机器、换虚拟环境都不会失效。
+
+只有从源码调试时才需要知道项目路径：
 
 ```powershell
 cd F:\MCP_Server\Qwen-TTS-MCP-DSH
 python -c "import pathlib; print(pathlib.Path('server.py').resolve())"
 ```
 
-记下输出的绝对路径，下面配置要用（示例用 `F:/MCP_Server/Qwen-TTS-MCP-DSH/server.py`）。
-**YAML 里请用正斜杠 `/`**，避免反斜杠转义问题。
-
 ---
 
 ## 2. 配置 API 密钥
 
-三选一，按优先级从低到高：
-
-### 方式 A：GUI 配置中心（推荐）
+推荐一条命令（隐藏输入、默认先联网验证、写入加密库）：
 
 ```powershell
-python -m qwen_voice_mcp gui
-# 或
+qwen-voice-mcp setup
+```
+
+以下方式任选其一，优先级从高到低：
+
+### 方式 A：命令行（推荐）
+
+```powershell
+qwen-voice-mcp setup                    # 隐藏输入
+qwen-voice-mcp config set-key --stdin   # 从管道读，适合脚本
+qwen-voice-mcp balance                  # 验证并查看余额
+qwen-voice-mcp config show              # 查看生效配置
+qwen-voice-mcp doctor                   # 体检：密钥来源、密钥库强度、客户端注册状态
+```
+
+### 方式 B：GUI 配置中心
+
+```powershell
 qwen-voice-mcp gui
 ```
 
@@ -58,23 +79,17 @@ Qwen Voice MCP — 配置中心
 
 点「验证」会先向 DashScope 发一次轻量请求确认密钥有效，通过后才写入加密库。
 密钥以 AES-256-GCM 加密存于 `%APPDATA%\qwen-voice-mcp\vault.enc`，主密钥由
-Windows 凭据管理器保管。
+Windows 凭据管理器保管；没有凭据管理器的环境（WSL/Docker/CI）自动回退到同目录
+密钥文件，`doctor` 会如实标明强度。
 
-### 方式 B：CLI
-
-```powershell
-qwen-voice-mcp config set-key sk-xxxxxxxxxxxx
-qwen-voice-mcp balance          # 验证密钥并查看余额
-qwen-voice-mcp config show      # 查看生效配置
-```
-
-### 方式 C：环境变量（不回退到 vault）
+### 方式 C：环境变量 / .env
 
 ```powershell
 $env:DASHSCOPE_API_KEY = "sk-xxxxxxxxxxxx"
 ```
 
-> 环境变量优先级最高。若已设置环境变量，vault 中的值不会被使用。
+也可以写在当前目录或配置目录的 `.env` 里（`QWEN_VOICE_NO_DOTENV=1` 可关闭）。
+**环境变量优先级最高**：一旦设置，加密库里的值不会被使用。
 
 ---
 
@@ -84,26 +99,24 @@ $env:DASHSCOPE_API_KEY = "sk-xxxxxxxxxxxx"
 
 DSH 会自己拉起子进程，无需手动启动服务。
 
-写入 Harness Profile 的 `cordis.patch.yml`：
+最省事的写法（要求 `pipx install .` 装过，`qwen-voice-mcp` 在 PATH 里）：
 
 ```yaml
 mcp_servers:
   qwen-voice:
-    command: python
-    args: ["F:/MCP_Server/Qwen-TTS-MCP-DSH/server.py", "--transport", "stdio"]
-    env:
-      DASHSCOPE_API_KEY: "${QWEN_API_KEY}"
+    command: qwen-voice-mcp
+    args: ["run", "--transport", "stdio"]
 ```
 
-或使用模块入口：
+也可以让 `install` 直接打印这段：`qwen-voice-mcp print-config --client dsh`。
+
+从源码运行时才需要写解释器路径（与本仓库的 `.mcp.json` 等价）：
 
 ```yaml
 mcp_servers:
   qwen-voice:
     command: python
-    args: ["-m", "qwen_voice_mcp", "--transport", "stdio"]
-    env:
-      DASHSCOPE_API_KEY: "${QWEN_API_KEY}"
+    args: ["-m", "qwen_voice_mcp", "run", "--transport", "stdio"]
 ```
 
 ### 3.2 streamable-http 模式（远程/常驻）
@@ -194,7 +207,7 @@ qwen-voice-mcp verify-models
 
 | 现象 | 原因 | 处理 |
 |------|------|------|
-| `auth_error` | 密钥无效 / 未配置 / 无该模型权限 | `qwen-voice-mcp config set-key`，或检查 `QWEN_VOICE_HTTP_AUTH_TOKEN` |
+| `auth_error` | 密钥无效 / 未配置 / 无该模型权限 | `qwen-voice-mcp setup`，或检查 `QWEN_VOICE_HTTP_AUTH_TOKEN` |
 | `insufficient_balance` | 余额 ≤ 阈值 | 按返回消息中的提示为 Qwen 账户充值，或调低 `QWEN_VOICE_BALANCE_THRESHOLD` |
 | `balance_unavailable` | 所有余额端点探测失败且 `strict_balance=true` | 关闭严格模式，或检查网络/接口可用性 |
 | `model_not_supported` | 模型不在清单中 | 用 `list_voice_models` 查看可用项，或把它加入 `DEFAULT_MODELS` |
@@ -202,7 +215,9 @@ qwen-voice-mcp verify-models
 | `rate_limited` | 触发限流 | 稍后重试 |
 | `network_error` | 网络/超时 | 检查代理与连通性 |
 | `upstream_error` | DashScope 服务端错误 | 稍后重试；错误详情在服务端日志 |
-| DSH 里看不到工具 | 服务启动失败 / 路径错误 | 手动跑 `python server.py --selftest` 看报错 |
+| DSH 里看不到工具 | 服务启动失败 / 路径错误 / 未注册 | 跑 `qwen-voice-mcp doctor`，再 `qwen-voice-mcp print-config --client dsh` 对齐配置 |
+| `doctor` 显示 `mcp 包 │ 不兼容` | 装到了 mcp 2.x（`FastMCP` 已改名） | `pip install "mcp>=1.2,<2"` |
+| `doctor` 显示 `未配置` 但明明存过密钥 | 进程里存在过期的 `DASHSCOPE_API_KEY`，它优先于加密库 | `Remove-Item Env:\DASHSCOPE_API_KEY` 后重开终端 |
 | HTTP 模式 401 | Token 不一致 | 确认 `QWEN_VOICE_HTTP_AUTH_TOKEN` 与请求头一致 |
 
 ### 日志去哪里看

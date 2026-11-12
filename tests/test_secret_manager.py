@@ -115,3 +115,113 @@ def test_redact_hides_middle_and_keeps_hint():
 
 def test_redact_of_short_secret_is_all_masked():
     assert SecretManager.redact("abc") == "***"
+
+
+# ---------------------------------------------------------------------------
+# KEK fallback chain
+#
+# keyring only exists on desktops: Linux/WSL/Docker/CI fall back to keyring's
+# fail backend, where ``set_password`` raises. Before the key-file fallback, that
+# made ``qwen-voice-mcp setup`` impossible off Windows/macOS — the one thing a
+# first-time user must do.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def no_keyring(monkeypatch):
+    """Make every keyring operation fail, as an unavailable backend does."""
+    import keyring
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("no usable keyring backend")
+
+    monkeypatch.setattr(keyring, "get_password", boom)
+    monkeypatch.setattr(keyring, "set_password", boom)
+    return boom
+
+
+@pytest.fixture
+def memory_keyring(monkeypatch):
+    """A working credential store backed by a dict."""
+    import keyring
+
+    store: dict[tuple[str, str], str] = {}
+    monkeypatch.setattr(keyring, "get_password", lambda s, u: store.get((s, u)))
+    monkeypatch.setattr(
+        keyring, "set_password", lambda s, u, v: store.__setitem__((s, u), v)
+    )
+    return store
+
+
+def test_store_succeeds_without_a_keyring_backend(tmp_path, no_keyring):
+    """A headless machine must still be able to save the API key."""
+    sm = SecretManager(path=tmp_path / "vault.enc")
+    sm.store("DASHSCOPE_API_KEY", KEY)
+
+    assert sm.retrieve("DASHSCOPE_API_KEY") == KEY
+    blob = json.loads(sm.path.read_text(encoding="utf-8"))
+    assert blob["mode"] == "keyfile"
+    assert (tmp_path / "vault.enc.key").exists()
+
+
+def test_keyfile_mode_never_puts_the_secret_in_either_file(tmp_path, no_keyring):
+    SecretManager(path=tmp_path / "vault.enc").store("k", KEY)
+    assert KEY.encode() not in (tmp_path / "vault.enc").read_bytes()
+    assert KEY.encode() not in (tmp_path / "vault.enc.key").read_bytes()
+
+
+def test_keyfile_vault_reopens_from_a_fresh_instance(tmp_path, no_keyring):
+    SecretManager(path=tmp_path / "vault.enc").store("k", KEY)
+    assert SecretManager(path=tmp_path / "vault.enc").retrieve("k") == KEY
+
+
+def test_keyring_mode_is_preferred_when_a_backend_works(tmp_path, memory_keyring):
+    sm = SecretManager(path=tmp_path / "vault.enc")
+    sm.store("k", KEY)
+
+    assert sm.retrieve("k") == KEY
+    blob = json.loads(sm.path.read_text(encoding="utf-8"))
+    assert blob["mode"] == "keyring"
+    assert not (tmp_path / "vault.enc.key").exists()
+
+
+def test_explicit_passphrase_beats_the_keyfile_fallback(tmp_path, no_keyring):
+    """A passphrase the user actually typed must decide the mode, not the fallback."""
+    sm = SecretManager(path=tmp_path / "vault.enc", passphrase="pw")
+    sm.store("k", KEY)
+
+    blob = json.loads(sm.path.read_text(encoding="utf-8"))
+    assert blob["mode"] == "passphrase"
+
+
+def test_default_vault_path_defers_to_config_home(monkeypatch, tmp_path):
+    """config.json and vault.enc must not drift into different directories.
+
+    The Windows branch happens to agree today; the non-Windows branch did not
+    (``~/.config`` here vs ``XDG_CONFIG_HOME`` there). Pinning the delegation
+    keeps a single source of truth for the config home.
+    """
+    from qwen_voice_mcp.core import secret_manager as sm_mod
+
+    shared = tmp_path / "shared-home"
+    monkeypatch.delenv("QWEN_VOICE_VAULT", raising=False)
+    monkeypatch.setattr(sm_mod, "config_home", lambda: shared, raising=False)
+
+    assert sm_mod.default_vault_path() == shared / "vault.enc"
+
+
+def test_vault_follows_qwen_voice_home(monkeypatch, tmp_path):
+    from qwen_voice_mcp.core.secret_manager import default_vault_path
+
+    home = tmp_path / "h"
+    monkeypatch.setenv("QWEN_VOICE_HOME", str(home))
+    monkeypatch.delenv("QWEN_VOICE_VAULT", raising=False)
+    assert default_vault_path() == home / "vault.enc"
+
+
+def test_default_vault_path_honours_an_explicit_override(monkeypatch, tmp_path):
+    from qwen_voice_mcp.core.secret_manager import default_vault_path
+
+    target = tmp_path / "custom" / "s.enc"
+    monkeypatch.setenv("QWEN_VOICE_VAULT", str(target))
+    assert default_vault_path() == target
