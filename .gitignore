@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp/
+*.egg-info/
+build/
+dist/
+
+# Local tooling
+.npm-cache/
+.venv/
+venv/
+
+# Local agent config
+.claude/skills/qwen-voice/
+.dsh/skills/qwen-voice/

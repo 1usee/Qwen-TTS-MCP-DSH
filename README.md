@@ -89,6 +89,24 @@ mcp_servers:
 
 ---
 
+## 在其他 Agent 中复用（Claude Code / Codex / DSH）
+
+除了注册 MCP 服务器，本仓库还提供一份**可移植 Skill**：
+
+```
+skills/qwen-voice/SKILL.md          # 技能入口（英文，Agent Skills 通用）
+skills/qwen-voice/SKILL.zh-CN.md    # 同一内容的中文译本
+```
+
+- 服务器注册：Claude Code 用 `.mcp.json`，Codex 用 `~/.codex/config.toml`，DSH 用 `cordis.yml`。
+- Skill 安装：复制到各客户端的 skills 目录，或让 `AGENTS.md` 指向它。
+- 完整步骤与验收用例：[中文](docs/agent-integration.zh-CN.md) / [English](docs/agent-integration.md)。
+
+`skills/qwen-voice/SKILL.md` 由 `mcp-to-skill` 生成的草稿整理而来；原始生成物（含工具快照）
+保留在 [`docs/generated/mcp-to-skill/qwen-voice/`](docs/generated/mcp-to-skill/qwen-voice/)。
+
+---
+
 ## 架构
 
 ```
@@ -184,6 +202,7 @@ server.py ──► tools/*  ──► core/services.VoiceServices ──┬─�
 | D7 | 目录仅 `docs/integration-guide.md` | — | 增加设计规格与实现计划 |
 | D8 | 9.3 用 `python server.py`，第十章用 `qwen_voice_mcp.gui` | 两者不一致 | 可安装包 `qwen_voice_mcp/` + 根 `server.py` 转发入口，两种写法都可用 |
 | D9 | 音频依赖 `pydub` / `soundfile` | 本环境无 ffmpeg；`soundfile` 的 libsndfile 原生支持 MP3/FLAC/OGG | `soundfile` 为首选后端，`pydub` 仅在 ffmpeg 存在时启用，另保留纯标准库回退 |
+| D10 | 只描述 DSH 接入 | Claude Code / Codex 也需要可复用的使用指引 | 增加 `skills/qwen-voice/SKILL.md`（英文入口）与 `SKILL.zh-CN.md`（中文译本）、`AGENTS.md`、`.mcp.json`，以及中英双语 `docs/agent-integration*.md` |
 
 ---
 

@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "serverName": "qwen-voice",
+  "generatedAt": "2026-11-12T04:18:42.317Z",
+  "tools": [
+    {
+      "name": "list_voice_models",
+      "description": "查询可用语音模型。用户询问“有哪些语音模型可用”时调用；返回模型清单、能力与默认模型。只读，不计费。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "list_voice_modelsArguments"
+      }
+    },
+    {
+      "name": "synthesize_speech",
+      "description": "文字转语音。用户提交文字并要求语音输出时调用；执行前会自动检查账户余额，余额不足时返回 insufficient_balance 并提示充值。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "voice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Voice"
+          },
+          "output_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Format"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "synthesize_speechArguments"
+      }
+    },
+    {
+      "name": "clone_voice",
+      "description": "声音克隆。用户上传语音文件并要求复制音色时调用；audio_path 支持本地路径、data: URI 或 base64，执行前自动检查余额。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "audio_path": {
+            "title": "Audio Path",
+            "type": "string"
+          },
+          "voice_name": {
+            "title": "Voice Name",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Model"
+          },
+          "language_hints": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Language Hints"
+          }
+        },
+        "required": [
+          "audio_path",
+          "voice_name"
+        ],
+        "title": "clone_voiceArguments"
+      }
+    },
+    {
+      "name": "check_balance",
+      "description": "查询账户余额。用户询问余额，或执行计费调用前自动检查；端点不可用时返回 balance 为 null 并附警告，不算失败。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "check_balanceArguments"
+      }
+    }
+  ]
+}
